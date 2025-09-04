@@ -1,5 +1,9 @@
 import pygame, random, time
 from pygame.locals import *
+import math
+
+import cupy as cp
+import python_network as nk
 
 #VARIABLES
 SCREEN_WIDHT = 400
@@ -15,6 +19,7 @@ PIPE_WIDHT = 80
 PIPE_HEIGHT = 500
 
 PIPE_GAP = 150
+BIRD_GAP = 126
 
 wing = 'assets/audio/wing.wav'
 hit = 'assets/audio/hit.wav'
@@ -77,7 +82,7 @@ class Pipe(pygame.sprite.Sprite):
         else:
             self.rect[1] = SCREEN_HEIGHT - ysize
 
-
+        self.ysize = ysize
         self.mask = pygame.mask.from_surface(self.image)
 
 
@@ -110,113 +115,183 @@ def get_random_pipes(xpos):
     pipe_inverted = Pipe(True, xpos, SCREEN_HEIGHT - size - PIPE_GAP)
     return pipe, pipe_inverted
 
+screen = None
 
-pygame.init()
-screen = pygame.display.set_mode((SCREEN_WIDHT, SCREEN_HEIGHT))
-pygame.display.set_caption('Flappy Bird')
+def init_screen():
+    global screen
+    pygame.init()
+    screen = pygame.display.set_mode((SCREEN_WIDHT, SCREEN_HEIGHT))
+    pygame.display.set_caption('Flappy Bird')
 
-BACKGROUND = pygame.image.load('assets/sprites/background-day.png')
-BACKGROUND = pygame.transform.scale(BACKGROUND, (SCREEN_WIDHT, SCREEN_HEIGHT))
-BEGIN_IMAGE = pygame.image.load('assets/sprites/message.png').convert_alpha()
+def start(auto_script:nk.Network, training=True):
+    Episode = 0
+    total_episode = int(input("Enter total episodes to go: "))
+    while Episode < total_episode:
+        print(Episode)
+        Episode += 1
+        BACKGROUND = pygame.image.load('assets/sprites/background-day.png')
+        BACKGROUND = pygame.transform.scale(BACKGROUND, (SCREEN_WIDHT, SCREEN_HEIGHT))
+        BEGIN_IMAGE = pygame.image.load('assets/sprites/message.png').convert_alpha()
 
-bird_group = pygame.sprite.Group()
-bird = Bird()
-bird_group.add(bird)
+        bird_group = pygame.sprite.Group()
+        bird = Bird()
+        bird_group.add(bird)
 
-ground_group = pygame.sprite.Group()
+        ground_group = pygame.sprite.Group()
 
-for i in range (2):
-    ground = Ground(GROUND_WIDHT * i)
-    ground_group.add(ground)
+        for i in range (2):
+            ground = Ground(GROUND_WIDHT * i)
+            ground_group.add(ground)
 
-pipe_group = pygame.sprite.Group()
-for i in range (2):
-    pipes = get_random_pipes(SCREEN_WIDHT * i + 800)
-    pipe_group.add(pipes[0])
-    pipe_group.add(pipes[1])
-
-
-
-clock = pygame.time.Clock()
-
-begin = True
-
-while begin:
-
-    clock.tick(15)
-
-    for event in pygame.event.get():
-        if event.type == QUIT:
-            pygame.quit()
-        if event.type == KEYDOWN:
-            if event.key == K_SPACE or event.key == K_UP:
-                bird.bump()
-                pygame.mixer.music.load(wing)
-                pygame.mixer.music.play()
-                begin = False
-
-    screen.blit(BACKGROUND, (0, 0))
-    screen.blit(BEGIN_IMAGE, (120, 150))
-
-    if is_off_screen(ground_group.sprites()[0]):
-        ground_group.remove(ground_group.sprites()[0])
-
-        new_ground = Ground(GROUND_WIDHT - 20)
-        ground_group.add(new_ground)
-
-    bird.begin()
-    ground_group.update()
-
-    bird_group.draw(screen)
-    ground_group.draw(screen)
-
-    pygame.display.update()
+        pipe_group = pygame.sprite.Group()
+        for i in range (2):
+            pipes = get_random_pipes(SCREEN_WIDHT * i + 400)
+            pipe_group.add(pipes[0])
+            pipe_group.add(pipes[1])
 
 
-while True:
+        clock = pygame.time.Clock()
 
-    clock.tick(15)
 
-    for event in pygame.event.get():
-        if event.type == QUIT:
-            pygame.quit()
-        if event.type == KEYDOWN:
-            if event.key == K_SPACE or event.key == K_UP:
-                bird.bump()
-                pygame.mixer.music.load(wing)
-                pygame.mixer.music.play()
+        def main_menu():
+                #     Reward_list[-1] = -150
+            begin = True 
+            while begin:
 
-    screen.blit(BACKGROUND, (0, 0))
+                clock.tick(15)
 
-    if is_off_screen(ground_group.sprites()[0]):
-        ground_group.remove(ground_group.sprites()[0])
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        pygame.quit()
+                    if event.type == KEYDOWN:
+                        if event.key == K_SPACE or event.key == K_UP:
+                            bird.bump()
+                            begin = False
 
-        new_ground = Ground(GROUND_WIDHT - 20)
-        ground_group.add(new_ground)
+                screen.blit(BACKGROUND, (0, 0))
+                screen.blit(BEGIN_IMAGE, (120, 150))
 
-    if is_off_screen(pipe_group.sprites()[0]):
-        pipe_group.remove(pipe_group.sprites()[0])
-        pipe_group.remove(pipe_group.sprites()[0])
+                if is_off_screen(ground_group.sprites()[0]):
+                    ground_group.remove(ground_group.sprites()[0])
 
-        pipes = get_random_pipes(SCREEN_WIDHT * 2)
+                    new_ground = Ground(GROUND_WIDHT - 20)
+                    ground_group.add(new_ground)
 
-        pipe_group.add(pipes[0])
-        pipe_group.add(pipes[1])
+                bird.begin()
+                ground_group.update()
 
-    bird_group.update()
-    ground_group.update()
-    pipe_group.update()
+                bird_group.draw(screen)
+                ground_group.draw(screen)
 
-    bird_group.draw(screen)
-    pipe_group.draw(screen)
-    ground_group.draw(screen)
+                pygame.display.update()
 
-    pygame.display.update()
+        def run_game():
+            X_list = []
+            Y_list = []
+            Reward_list = []
+            Reward_multiplier = 0.99
+            while True:
+                clock.tick(20)
+                pipes = pipe_group.sprites()
+                pipe_gap_y = (pipes[0].rect[1] - BIRD_GAP /2 - PIPE_GAP + BIRD_GAP)
+                parameters = cp.array([bird.rect[1] / SCREEN_HEIGHT, -bird.speed/ SCREEN_WIDHT, (pipes[0].rect[0] - bird.rect[0])/ SCREEN_WIDHT, (pipe_gap_y - bird.rect[1])/ SCREEN_HEIGHT]).reshape(-1,1)
+                X_list.append(parameters)
+                data = auto_script.forward(parameters)
+                if training:
+                    Y_list.append(int(data[-1][0][0] > 0.5))
+                    if Y_list[-1] == 1:
+                        bird.bump()
+                for event in pygame.event.get():
+                    if event.type == QUIT:
+                        pygame.quit()
+                    if event.type == KEYDOWN:
+                        if event.key == K_ESCAPE:
+                            exit(0)
+                        if event.key == K_SPACE or event.key == K_UP:
+                            bird.bump()
+                # bird.rect[1] = pipe_gap_y
+                screen.blit(BACKGROUND, (0, 0))
+                
+                if is_off_screen(ground_group.sprites()[0]):
+                    ground_group.remove(ground_group.sprites()[0])
 
-    if (pygame.sprite.groupcollide(bird_group, ground_group, False, False, pygame.sprite.collide_mask) or
-            pygame.sprite.groupcollide(bird_group, pipe_group, False, False, pygame.sprite.collide_mask)):
-        pygame.mixer.music.load(hit)
-        pygame.mixer.music.play()
-        time.sleep(1)
-        break
+                    new_ground = Ground(GROUND_WIDHT - 20)
+                    ground_group.add(new_ground)
 
+                appended = False
+                if is_off_screen(pipe_group.sprites()[0]):
+                    pipe_group.remove(pipe_group.sprites()[0])
+                    pipe_group.remove(pipe_group.sprites()[0])
+
+                    pipes = get_random_pipes(SCREEN_WIDHT * 2)
+
+                    pipe_group.add(pipes[0])
+                    pipe_group.add(pipes[1])
+                    if training:
+                        Reward_list.append(10.0)
+                        appended = True
+
+                bird_group.update()
+                ground_group.update()
+                pipe_group.update()
+
+                bird_group.draw(screen)
+                pipe_group.draw(screen)
+                ground_group.draw(screen)
+
+                pygame.display.update()
+
+                if (pygame.sprite.groupcollide(bird_group, ground_group, False, False, pygame.sprite.collide_mask) or
+                        pygame.sprite.groupcollide(bird_group, pipe_group, False, False, pygame.sprite.collide_mask)) or bird.rect[1] < 10:
+                    # time.sleep(1)
+                    if training:
+                        Reward_list.append(-100.0)
+                    break
+                elif not appended and training:
+                    Reward_list.append(0.99)
+                if training:
+                    dis = abs(pipe_gap_y - bird.rect[1]) / SCREEN_HEIGHT
+                    if dis != 0:
+                        Reward_list[-1] /= dis
+                    if dis > 0.1:
+                        Reward_list[-1] *= -dis * dis * SCREEN_HEIGHT
+                    if Reward_list[-1] < -100.0:
+                        Reward_list[-1] = -100.0 - dis * SCREEN_HEIGHT
+                    Reward_list[-1] *= Reward_multiplier
+                    Reward_multiplier *= 0.99
+                # print(Reward_list[-1])
+                # print(dis)
+            if training:
+                X_list = cp.array(X_list).T[0]
+                Y_list = cp.array(Y_list).reshape(1, -1)
+                Reward_list = cp.array(Reward_list).reshape(1, -1)
+                forward = auto_script.forward(X_list)
+                back_prop = auto_script.backward_prop_policy(forward, X_list, Y_list, Reward_list)
+                auto_script.update_params(back_prop, 0.01)
+            return
+        run_game()
+    continuing = input("Do you want to continue? (Y/n) ")
+    if continuing == 'y' or continuing == 'Y':
+        start(auto_script)
+        return
+    save_model = input('Save model? (Y/n)')
+    if(save_model != 'n'):
+        auto_script.save_model('model.pkl')
+    return
+
+if __name__ == "__main__":
+    auto_script = nk.Network()
+    auto_script.add_layer(4, 0, 0)
+    auto_script.add_layer(16, nk.ReLu, nk.ReLu_derive)
+    auto_script.add_layer(8, nk.ReLu, nk.ReLu_derive)
+    auto_script.add_layer(1, nk.sigmoid, 0)
+
+    auto_script.apply_randomization(1, nk.uniform_rand, -1.22, 1.22)
+    auto_script.apply_randomization(2, nk.uniform_rand, -0.61, 0.61)
+    limit = cp.sqrt(6 / (8 + 1))
+    auto_script.apply_randomization(3, nk.uniform_rand, -limit, limit)
+    # nk.test()
+    random.seed(0)
+    init_screen()
+    # auto_script.load_model('model.pkl')
+    start(auto_script)
