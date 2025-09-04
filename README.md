@@ -1,4 +1,4 @@
-# Forked clone from 
+# Forked clone 
 Credit to: https://github.com/LeonMarqs/Flappy-bird-python
 
 Adds AI implementation to learn and play flappy bird using Rewards
